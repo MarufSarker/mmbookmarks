@@ -88,53 +88,11 @@ void manager::prepare_databases()
     if (!opened())
         throw std::runtime_error {"Database need to be opened."};
 
-
-    // mm_versions
-
-    m_database.execute(std::string {sql::versions::create});
-
-    for (auto const& v : sql::versions::triggers)
+    for (auto const& v : sql::versions::create)
         m_database.execute(v);
 
-    m_database.execute(sql::versions::insert_version);
-
-
-    // mm_bookmarks
-
-    m_database.execute(sql::bookmarks::create);
-
-    for (auto const& v : sql::bookmarks::triggers)
+    for (auto const& v : sql::bookmarks::create)
         m_database.execute(v);
-
-    // primary containers
-    // currently -
-    //  try INSERT OR IGNORE for all primary containers
-    //  check if 256 of them exists
-    // ideally [TODO]
-    //  check if 256 of them exists
-    //  while chekcing accept any ones which have been added
-    //  as in not [reserved] titled
-
-    // will fail if already exists
-    try
-    {
-        m_database.execute(sql::bookmarks::insert_primary_containers);
-    }
-    catch (...)
-    {
-    }
-
-    std::vector<sqlite::row> primaries =
-        m_database.execute(sql::bookmarks::primary_containers_count);
-
-    if (primaries.size() != 1 || primaries.at(0).columns().size() != 1)
-        throw std::runtime_error {"Unexpected primary containers received."};
-
-    bool primary_containers_exists =
-        (primaries.at(0).columns().at("COUNT(*)").value() == "256");
-
-    if (!primary_containers_exists)
-        throw std::runtime_error {"Not all primary containers exists."};
 }
 
 
@@ -163,15 +121,10 @@ void manager::insert_bookmarks(std::vector<bookmark> const& bookmarks)
         bookmark bm = bookmarks.at(i);
 
         if (bm.container.empty())
-            bm.container =
-                sqlite::to_string(sql::bookmarks::helpers::default_container);
+            bm.container = sql::bookmarks::helpers::defaults::container;
 
-        // validity check
-        sqlite::to_int(bm.container);
-
-        if (bm.type !=
-                std::to_string(sql::bookmarks::helpers::type_container) &&
-            bm.type != std::to_string(sql::bookmarks::helpers::type_url))
+        if (bm.type != sql::bookmarks::helpers::type::container &&
+            bm.type != sql::bookmarks::helpers::type::url)
             throw std::runtime_error {"Invalid bookmark type."};
 
         sqlite::row tmp_row = bm.to_row(true, std::to_string(i));
@@ -209,11 +162,6 @@ void manager::update_bookmarks(std::vector<bookmark> const& bookmarks)
 
     for (auto const& v : bookmarks)
     {
-        // validity check
-        sqlite::to_int(v.identifier);
-        if (!v.container.empty())
-            sqlite::to_int(v.container);
-
         sqlite::row              _row {};
         std::vector<std::string> tmps {};
 
@@ -231,10 +179,7 @@ void manager::update_bookmarks(std::vector<bookmark> const& bookmarks)
             _row.append(name, sqlite::column {value, type, param});
         };
 
-        _add("container",
-             "NEWCONTAINER",
-             v.container,
-             sqlite::data_type::INTEGER);
+        _add("container", "NEWCONTAINER", v.container);
         _add("url", "NEWURL", v.url);
         _add("title", "NEWTITLE", v.title);
         _add("note", "NEWNOTE", v.note);
@@ -246,9 +191,8 @@ void manager::update_bookmarks(std::vector<bookmark> const& bookmarks)
             sql += ((i > 0) ? ", " : "") + tmps.at(i);
 
         sql += " WHERE [identifier] == :OLDIDENTIFIER;";
-        _row.append(
-            "OLDIDENTIFIER",
-            sqlite::column {sqlite::to_int(v.identifier), "OLDIDENTIFIER"});
+        _row.append("OLDIDENTIFIER",
+                    sqlite::column {v.identifier, "OLDIDENTIFIER"});
 
         m_database.execute(sql, _row);
     }
@@ -263,16 +207,14 @@ void manager::delete_bookmarks(std::vector<std::string> const& identifiers)
     if (identifiers.empty())
         return;
 
-    comparison comp {similarity_type::EQUAL,
-                     "identifier",
-                     sqlite::to_int(identifiers.at(0))};
+    comparison comp {similarity_type::EQUAL, "identifier", identifiers.at(0)};
 
     for (size_t i = 1; i < identifiers.size(); ++i)
     {
         comp.append(logical_type::OR,
                     comparison {similarity_type::EQUAL,
                                 "identifier",
-                                sqlite::to_int(identifiers.at(i))});
+                                identifiers.at(i)});
     }
 
     std::pair<std::string, sqlite::row> comp_data = comp.statement_and_row();
@@ -365,7 +307,7 @@ void manager::import_from(source_type const& type, std::string const& path)
     {
     case source_type::MMBOOKMARKS:
     {
-        namespace ns = sql::transfer::mmbookmarks::import;
+        namespace ns = sql::imports::mm_bookmarks;
         cleanup      = {ns::cleanup.begin(), ns::cleanup.end()};
         detach       = ns::detach;
         attach       = ns::attach;
@@ -375,7 +317,7 @@ void manager::import_from(source_type const& type, std::string const& path)
     }
     case source_type::FIREFOX_SQLITE:
     {
-        namespace ns = sql::transfer::firefox_places_sqlite::import;
+        namespace ns = sql::imports::firefox_places_sqlite;
         cleanup      = {ns::cleanup.begin(), ns::cleanup.end()};
         detach       = ns::detach;
         attach       = ns::attach;
@@ -414,7 +356,7 @@ void manager::import_from(source_type const& type, std::string const& path)
     };
 
 
-    static auto __import_prepare_and_process =
+    static auto _import_prepare_and_process =
         [](sqlite::database&               database_,
            std::string const&              attach_,
            std::string const&              path_,
@@ -447,8 +389,7 @@ void manager::import_from(source_type const& type, std::string const& path)
 
     _import_cleanup(m_database, cleanup, detach, false);
 
-    __import_prepare_and_process(
-        m_database, attach, path, preparation, process);
+    _import_prepare_and_process(m_database, attach, path, preparation, process);
 
     _import_cleanup(m_database, cleanup, detach, true);
 }

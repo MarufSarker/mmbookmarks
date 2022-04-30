@@ -76,9 +76,9 @@ sqlite::row bookmark::to_row(bool const&        assign_parameters,
                 (assign_parameters ? form_parameter(name_, postfix) : "")});
     };
 
-    _col("identifier", identifier, sqlite::data_type::INTEGER);
-    _col("container", container, sqlite::data_type::INTEGER);
-    _col("type", type, sqlite::data_type::INTEGER);
+    _col("identifier", identifier, sqlite::data_type::TEXT);
+    _col("container", container, sqlite::data_type::TEXT);
+    _col("type", type, sqlite::data_type::TEXT);
     _col("url", url, sqlite::data_type::TEXT, true);
     _col("title", title, sqlite::data_type::TEXT, true);
     _col("note", note, sqlite::data_type::TEXT, true);
